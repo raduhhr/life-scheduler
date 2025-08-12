@@ -55,18 +55,26 @@ def board_label_maps(board_id):
     return id_to_name, name_to_id
 
 def list_cards(list_id):
-    return trello("GET", f"/lists/{list_id}/cards",
-                  params={"fields":"name,idLabels,due,closed"})
+    # include archived cards so we can auto-unarchive timer cards
+    return trello(
+        "GET",
+        f"/lists/{list_id}/cards",
+        params={"fields": "name,idLabels,due,closed", "filter": "all"},
+    )
 
 def create_card(list_id, name):
     return trello("POST", "/cards", params={"idList": list_id, "name": name})
 
 def update_card_due(card_id, due_iso):
-    return trello("PUT", f"/cards/{card_id}", params={"due": due_iso})
+    trello("PUT", f"/cards/{card_id}", params={"due": due_iso})
+
+def set_card_closed(card_id, closed: bool):
+    trello("PUT", f"/cards/{card_id}", params={"closed": str(closed).lower()})
 
 def parse_due_utc(due):
-    if not due: return None
-    base = due.replace("Z","").split(".")[0]
+    if not due:
+        return None
+    base = due.replace("Z", "").split(".")[0]
     return datetime.fromisoformat(base).replace(tzinfo=ZoneInfo("UTC"))
 
 def next_due_utc(cadence_days: int, hour: str) -> str:
@@ -101,9 +109,18 @@ def main():
     id_to_name, _ = board_label_maps(board_id)
 
     cards = list_cards(list_id)
-    active_names = {c["name"] for c in cards if not c.get("closed")}
 
-    timer_label = CFG["labels"]["timer"].lower()
+    # auto-unarchive timer cards (so you can keep a library in archive)
+    timer_label_name = CFG["labels"]["timer"].lower()
+    for c in cards:
+        if c.get("closed"):
+            label_names = [id_to_name.get(lid, "").lower() for lid in c.get("idLabels", [])]
+            if timer_label_name in label_names:
+                set_card_closed(c["id"], False)  # unarchive
+                c["closed"] = False  # reflect locally
+
+    # recompute convenience sets after potential unarchives
+    active_names = {c["name"] for c in cards if not c.get("closed")}
 
     # Cadences structure: {label: {"days": int, "category": str}}
     cadences_cfg = CFG.get("cadences", {})
@@ -123,9 +140,12 @@ def main():
     bumped = 0
 
     for c in cards:
-        label_names = [id_to_name.get(lid,"") for lid in c.get("idLabels",[])]
+        if c.get("closed"):
+            continue  # if still closed and not a timer, skip
+
+        label_names = [id_to_name.get(lid, "") for lid in c.get("idLabels", [])]
         lname_set = {n.lower() for n in label_names}
-        if timer_label not in lname_set:
+        if timer_label_name not in lname_set:
             continue
 
         cadence_label = None
