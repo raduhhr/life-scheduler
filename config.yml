@@ -1,0 +1,29 @@
+labels:
+  timer: "timer"  # Name of the label you’ll put on all timer cards
+
+# Each cadence = a label you create in Trello and add to the timer card
+# "days" = interval, "category" = for metrics CSV
+cadences:
+  every-2-days:
+    days: 2
+    category: "ai"         # Example: AI work
+  every-3-days:
+    days: 3
+    category: "tresor"     # Example: Homelab
+  every-4-days:
+    days: 4
+    category: "learning"   # Example: Algorithms
+
+defaults:
+  timer_hour: "03:00"          # Time the next due is set to
+  daily_spawn_suffix: " – 1h"  # Added to generated task names
+
+# Only needed if you pass BOARD_ID (script will find this list by name)
+list_name: "Daily Log"
+
+# Timezone for due date calc + metrics timestamps
+timezone: "Europe/Bucharest"
+
+metrics:
+  enable: true
+  csv_path: "metrics/blocks.csv"  # Relative path inside repo
