@@ -7,14 +7,14 @@ import yaml
 
 API = "https://api.trello.com/1"
 
-# --- Secrets (use your GH Actions names; fallback to old names for local runs) ---
+# --- Secrets (GH Actions names first; local fallbacks) ---
 KEY   = (os.environ.get("TRELLO_API_KEY")  or os.environ.get("TRELLO_KEY")  or "").strip()
 TOKEN = (os.environ.get("TRELLO_API_TOKEN") or os.environ.get("TRELLO_TOKEN") or "").strip()
 if not KEY or not TOKEN:
     print("Missing Trello creds: set TRELLO_API_KEY/TRELLO_API_TOKEN (or TRELLO_KEY/TRELLO_TOKEN).", file=sys.stderr)
     sys.exit(1)
 
-# --- Board/List wiring (pass one of these via Actions Variables) ---
+# --- Board/List wiring ---
 BOARD_ID = os.environ.get("TRELLO_BOARD_ID")     # either this...
 LIST_ID  = os.environ.get("TRELLO_LIST_ID")      # ...or this
 CFG_PATH = os.environ.get("CONFIG_PATH", "config.yml")
@@ -54,12 +54,24 @@ def board_label_maps(board_id):
     name_to_id = {(lbl.get("name") or "").lower(): lbl["id"] for lbl in labels}
     return id_to_name, name_to_id
 
-def list_cards(list_id):
-    # include archived cards so we can auto-unarchive timer cards
+def list_cards(list_id, include_closed=False):
     return trello(
         "GET",
         f"/lists/{list_id}/cards",
-        params={"fields": "name,idLabels,due,closed", "filter": "all"},
+        params={
+            "fields": "name,idLabels,due,closed,idList",
+            "filter": "all" if include_closed else "open",
+        },
+    )
+
+def board_cards(board_id, only_closed=False):
+    return trello(
+        "GET",
+        f"/boards/{board_id}/cards",
+        params={
+            "fields": "name,idLabels,due,closed,idList",
+            "filter": "closed" if only_closed else "all",
+        },
     )
 
 def create_card(list_id, name):
@@ -70,6 +82,9 @@ def update_card_due(card_id, due_iso):
 
 def set_card_closed(card_id, closed: bool):
     trello("PUT", f"/cards/{card_id}", params={"closed": str(closed).lower()})
+
+def move_card_to_list(card_id, list_id):
+    trello("PUT", f"/cards/{card_id}", params={"idList": list_id})
 
 def parse_due_utc(due):
     if not due:
@@ -87,19 +102,15 @@ def ensure_metrics_csv(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not os.path.exists(path):
         with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["timestamp_local","task_name","cadence_label","category","list_id","card_id_spawned"])
+            csv.writer(f).writerow(
+                ["timestamp_local","task_name","cadence_label","category","list_id","card_id_spawned"]
+            )
 
 def append_metric(path, task_name, cadence_label, category, list_id, card_id):
     with open(path, "a", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow([
+        csv.writer(f).writerow([
             datetime.now(TZ).isoformat(timespec="seconds"),
-            task_name,
-            cadence_label,
-            category,
-            list_id,
-            card_id
+            task_name, cadence_label, category, list_id, card_id
         ])
 
 def main():
@@ -108,21 +119,25 @@ def main():
     board_id = lst["idBoard"]
     id_to_name, _ = board_label_maps(board_id)
 
-    cards = list_cards(list_id)
-
-    # auto-unarchive timer cards (so you can keep a library in archive)
     timer_label_name = CFG["labels"]["timer"].lower()
-    for c in cards:
-        if c.get("closed"):
-            label_names = [id_to_name.get(lid, "").lower() for lid in c.get("idLabels", [])]
-            if timer_label_name in label_names:
-                set_card_closed(c["id"], False)  # unarchive
-                c["closed"] = False  # reflect locally
 
-    # recompute convenience sets after potential unarchives
+    # --- 1) pull any archived timer cards anywhere on the board back to Daily Log
+    archived = board_cards(board_id, only_closed=True)
+    recovered = 0
+    for c in archived:
+        label_names = [id_to_name.get(lid, "").lower() for lid in c.get("idLabels", [])]
+        if timer_label_name in label_names:
+            set_card_closed(c["id"], False)     # unarchive
+            move_card_to_list(c["id"], list_id) # ensure it’s in Daily Log
+            recovered += 1
+    if recovered:
+        print(f"Recovered {recovered} archived timer card(s) to Daily Log")
+
+    # --- 2) load current Daily Log cards (open only)
+    cards = list_cards(list_id, include_closed=False)
     active_names = {c["name"] for c in cards if not c.get("closed")}
 
-    # Cadences structure: {label: {"days": int, "category": str}}
+    # cadences from config
     cadences_cfg = CFG.get("cadences", {})
     cadences = {k.lower(): {"days": int(v["days"]), "category": v.get("category","uncategorized")}
                 for k,v in cadences_cfg.items()}
@@ -140,9 +155,6 @@ def main():
     bumped = 0
 
     for c in cards:
-        if c.get("closed"):
-            continue  # if still closed and not a timer, skip
-
         label_names = [id_to_name.get(lid, "") for lid in c.get("idLabels", [])]
         lname_set = {n.lower() for n in label_names}
         if timer_label_name not in lname_set:
@@ -177,7 +189,7 @@ def main():
         update_card_due(c["id"], new_due)
         bumped += 1
 
-    print(f"Timers processed OK — spawned: {created}, bumped: {bumped}")
+    print(f"Timers processed OK — recovered: {recovered}, spawned: {created}, bumped: {bumped}")
 
 if __name__ == "__main__":
     main()
