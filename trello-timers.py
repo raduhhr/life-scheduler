@@ -114,6 +114,9 @@ def main():
     if metrics_on:
         ensure_metrics_csv(metrics_path)
 
+    created = 0
+    bumped = 0
+
     for c in cards:
         label_names = [id_to_name.get(lid,"") for lid in c.get("idLabels",[])]
         lname_set = {n.lower() for n in label_names}
@@ -141,13 +144,15 @@ def main():
         if work_name not in active_names:
             spawned = create_card(list_id, work_name)
             active_names.add(work_name)
+            created += 1
             if metrics_on:
                 append_metric(metrics_path, work_name, cadence_label, category, list_id, spawned["id"])
 
         new_due = next_due_utc(cadence_days, timer_hour)
         update_card_due(c["id"], new_due)
+        bumped += 1
 
-    print("Timers processed OK")
+    print(f"Timers processed OK — spawned: {created}, bumped: {bumped}")
 
 if __name__ == "__main__":
     main()
