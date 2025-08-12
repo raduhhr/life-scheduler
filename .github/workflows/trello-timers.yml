@@ -2,31 +2,48 @@ name: Trello Timers
 
 on:
   schedule:
-    # Runs every day at 03:00 UTC (adjust if you want different time)
-    - cron: "0 3 * * *"
-  workflow_dispatch:  # Allow manual runs
+    - cron: "5 0 * * *"   # 00:05 UTC (~03:05 Europe/Bucharest)
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  run-timers:
+  run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Trello Timers
+      - name: Run timers
         env:
-          TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
-          TRELLO_API_TOKEN: ${{ secrets.TRELLO_API_TOKEN }}
+          # map GH secrets -> env names your script expects:
+          TRELLO_KEY:   ${{ secrets.TRELLO_API_KEY }}
+          TRELLO_TOKEN: ${{ secrets.TRELLO_API_TOKEN }}
+          # provide ONE of these via repo "Actions → Variables"
+          TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}   # script finds list by config.yml:list_name
+          # TRELLO_LIST_ID:  ${{ vars.TRELLO_LIST_ID }}  # or pass the list id directly
+          CONFIG_PATH: config.yml
+        run: python trello_timers.py
+
+      - name: Commit metrics (if changed)
         run: |
-          python trello_timers.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add metrics/blocks.csv
+            git commit -m "metrics: update $(date -u +%F)"
+            git push
+          else
+            echo "No changes to commit."
+          fi
