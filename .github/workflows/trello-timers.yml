@@ -34,7 +34,7 @@ jobs:
           TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}   # script finds list by config.yml:list_name
           # TRELLO_LIST_ID:  ${{ vars.TRELLO_LIST_ID }}  # or pass the list id directly
           CONFIG_PATH: config.yml
-        run: python trello_timers.py
+        run: python trello-timers.py
 
       - name: Commit metrics (if changed)
         run: |
