@@ -8,8 +8,8 @@ import yaml
 API = "https://api.trello.com/1"
 
 # --- Secrets (use your GH Actions names; fallback to old names for local runs) ---
-KEY   = os.environ.get("TRELLO_API_KEY")  or os.environ.get("TRELLO_KEY")
-TOKEN = os.environ.get("TRELLO_API_TOKEN") or os.environ.get("TRELLO_TOKEN")
+KEY   = (os.environ.get("TRELLO_API_KEY").strip()  or os.environ.get("TRELLO_KEY")  or "").strip()
+TOKEN = (os.environ.get("TRELLO_API_TOKEN").strip() or os.environ.get("TRELLO_TOKEN") or "").strip()
 if not KEY or not TOKEN:
     print("Missing Trello creds: set TRELLO_API_KEY/TRELLO_API_TOKEN (or TRELLO_KEY/TRELLO_TOKEN).", file=sys.stderr)
     sys.exit(1)
