@@ -7,8 +7,14 @@ import yaml
 
 API = "https://api.trello.com/1"
 
-KEY   = os.environ["TRELLO_KEY"]
-TOKEN = os.environ["TRELLO_TOKEN"]
+# --- Secrets (use your GH Actions names; fallback to old names for local runs) ---
+KEY   = os.environ.get("TRELLO_API_KEY")  or os.environ.get("TRELLO_KEY")
+TOKEN = os.environ.get("TRELLO_API_TOKEN") or os.environ.get("TRELLO_TOKEN")
+if not KEY or not TOKEN:
+    print("Missing Trello creds: set TRELLO_API_KEY/TRELLO_API_TOKEN (or TRELLO_KEY/TRELLO_TOKEN).", file=sys.stderr)
+    sys.exit(1)
+
+# --- Board/List wiring (pass one of these via Actions Variables) ---
 BOARD_ID = os.environ.get("TRELLO_BOARD_ID")     # either this...
 LIST_ID  = os.environ.get("TRELLO_LIST_ID")      # ...or this
 CFG_PATH = os.environ.get("CONFIG_PATH", "config.yml")
@@ -101,7 +107,6 @@ def main():
 
     # Cadences structure: {label: {"days": int, "category": str}}
     cadences_cfg = CFG.get("cadences", {})
-    # Normalize keys to lowercase
     cadences = {k.lower(): {"days": int(v["days"]), "category": v.get("category","uncategorized")}
                 for k,v in cadences_cfg.items()}
 
