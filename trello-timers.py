@@ -86,6 +86,12 @@ def set_due_and_uncomplete(card_id, due_iso):
     # critical: set due and dueComplete=false IN THE SAME REQUEST
     trello("PUT", f"/cards/{card_id}", params={"due": due_iso, "dueComplete": "false"})
 
+def is_card_overdue(due_utc, now_utc):
+    """Check if a card is actually overdue (past its due date)"""
+    if not due_utc:
+        return False
+    return now_utc >= due_utc
+
 def main():
     list_id = find_list_id()
     lst = trello("GET", f"/lists/{list_id}")
@@ -96,23 +102,28 @@ def main():
     cadences = {k.lower(): int(v["days"]) for k,v in CFG.get("cadences", {}).items()}
     timer_hour = CFG.get("defaults", {}).get("timer_hour","03:00")
 
-    recovered = bumped = reset_due = cleaned = 0
+    recovered = bumped = reset_due = cleaned = skipped = 0
     now_utc = datetime.now(ZoneInfo("UTC"))
 
-    # 1) recover archived timer cards that are due
+    # 1) recover only overdue archived timer cards
     for c in board_cards(board_id, filter_mode="closed"):
         labels = [id_to_name.get(lid,"").lower() for lid in c.get("idLabels",[])]
         if timer_label not in labels:
             continue
+        
         cadence_days = next((cadences[l] for l in labels if l in cadences), None)
         if not cadence_days:
             continue
 
         due_utc = parse_due_utc(c.get("due"))
-        if not due_utc or now_utc < due_utc:
+        
+        # Only recover if the card is actually overdue
+        if not is_card_overdue(due_utc, now_utc):
+            log(f"SKIP (not due yet) → '{c['name']}' due: {due_utc}")
+            skipped += 1
             continue
 
-        log(f"UNARCHIVE → '{c['name']}'")
+        log(f"UNARCHIVE (overdue) → '{c['name']}' was due: {due_utc}")
         set_card_closed(c["id"], False)
         move_card_to_list(c["id"], list_id)
         recovered += 1
@@ -134,7 +145,7 @@ def main():
                 cleaned += 1
                 log(f"cleanup clone → '{c['name']}'")
 
-    print(f"Timers OK — recovered:{recovered}, dueReset:{reset_due}, bumped:{bumped}, cleanedClones:{cleaned}")
+    print(f"Timers OK — recovered:{recovered}, dueReset:{reset_due}, bumped:{bumped}, skipped:{skipped}, cleanedClones:{cleaned}")
 
 if __name__ == "__main__":
     main()
