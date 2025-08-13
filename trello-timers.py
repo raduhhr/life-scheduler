@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, csv, time
+import os, sys, time
 import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -7,22 +7,26 @@ import yaml
 
 API = "https://api.trello.com/1"
 
-# --- Secrets (GH Actions names first; local fallbacks) ---
+# --- Secrets (GH Actions first; local fallbacks) ---
 KEY   = (os.environ.get("TRELLO_API_KEY")  or os.environ.get("TRELLO_KEY")  or "").strip()
 TOKEN = (os.environ.get("TRELLO_API_TOKEN") or os.environ.get("TRELLO_TOKEN") or "").strip()
 if not KEY or not TOKEN:
     print("Missing Trello creds: set TRELLO_API_KEY/TRELLO_API_TOKEN (or TRELLO_KEY/TRELLO_TOKEN).", file=sys.stderr)
     sys.exit(1)
 
-# --- Board/List wiring ---
-BOARD_ID = os.environ.get("TRELLO_BOARD_ID")     # either this...
-LIST_ID  = os.environ.get("TRELLO_LIST_ID")      # ...or this
+# --- Wiring ---
+BOARD_ID = os.environ.get("TRELLO_BOARD_ID")     # or set TRELLO_LIST_ID
+LIST_ID  = os.environ.get("TRELLO_LIST_ID")
 CFG_PATH = os.environ.get("CONFIG_PATH", "config.yml")
+VERBOSE  = os.environ.get("VERBOSE", "0") == "1"
 
 with open(CFG_PATH, "r", encoding="utf-8") as f:
     CFG = yaml.safe_load(f)
 
 TZ = ZoneInfo(CFG.get("timezone", "Europe/Bucharest"))
+
+def log(*a):
+    if VERBOSE: print(*a)
 
 def trello(method, path, **kwargs):
     params = kwargs.pop("params", {})
@@ -54,31 +58,21 @@ def board_label_maps(board_id):
     name_to_id = {(lbl.get("name") or "").lower(): lbl["id"] for lbl in labels}
     return id_to_name, name_to_id
 
-def list_cards(list_id, include_closed=False):
-    return trello(
-        "GET",
-        f"/lists/{list_id}/cards",
-        params={
-            "fields": "name,idLabels,due,closed,idList",
-            "filter": "all" if include_closed else "open",
-        },
-    )
+def board_cards(board_id, filter_mode="closed"):
+    # filter: 'open' | 'closed' | 'all'
+    return trello("GET", f"/boards/{board_id}/cards",
+        params={"fields":"name,idLabels,due,closed,idList", "filter": filter_mode})
 
-def board_cards(board_id, only_closed=False):
-    return trello(
-        "GET",
-        f"/boards/{board_id}/cards",
-        params={
-            "fields": "name,idLabels,due,closed,idList",
-            "filter": "closed" if only_closed else "all",
-        },
-    )
+def parse_due_utc(due):
+    if not due: return None
+    base = due.replace("Z","").split(".")[0]
+    return datetime.fromisoformat(base).replace(tzinfo=ZoneInfo("UTC"))
 
-def create_card(list_id, name):
-    return trello("POST", "/cards", params={"idList": list_id, "name": name})
-
-def update_card_due(card_id, due_iso):
-    trello("PUT", f"/cards/{card_id}", params={"due": due_iso})
+def next_due_utc(days: int, hour: str) -> str:
+    hh, mm = [int(x) for x in hour.split(":")]
+    target_local = (datetime.now(TZ).date() + timedelta(days=days))
+    dt_local = datetime(target_local.year, target_local.month, target_local.day, hh, mm, tzinfo=TZ)
+    return dt_local.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 def set_card_closed(card_id, closed: bool):
     trello("PUT", f"/cards/{card_id}", params={"closed": str(closed).lower()})
@@ -86,32 +80,8 @@ def set_card_closed(card_id, closed: bool):
 def move_card_to_list(card_id, list_id):
     trello("PUT", f"/cards/{card_id}", params={"idList": list_id})
 
-def parse_due_utc(due):
-    if not due:
-        return None
-    base = due.replace("Z", "").split(".")[0]
-    return datetime.fromisoformat(base).replace(tzinfo=ZoneInfo("UTC"))
-
-def next_due_utc(cadence_days: int, hour: str) -> str:
-    hh, mm = [int(x) for x in hour.split(":")]
-    target_local = (datetime.now(TZ).date() + timedelta(days=cadence_days))
-    dt_local = datetime(target_local.year, target_local.month, target_local.day, hh, mm, tzinfo=TZ)
-    return dt_local.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-def ensure_metrics_csv(path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(
-                ["timestamp_local","task_name","cadence_label","category","list_id","card_id_spawned"]
-            )
-
-def append_metric(path, task_name, cadence_label, category, list_id, card_id):
-    with open(path, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([
-            datetime.now(TZ).isoformat(timespec="seconds"),
-            task_name, cadence_label, category, list_id, card_id
-        ])
+def update_card_due(card_id, due_iso):
+    trello("PUT", f"/cards/{card_id}", params={"due": due_iso})
 
 def main():
     list_id = find_list_id()
@@ -121,53 +91,25 @@ def main():
 
     timer_label_name = CFG["labels"]["timer"].lower()
 
-    # --- 1) pull any archived timer cards anywhere on the board back to Daily Log
-    archived = board_cards(board_id, only_closed=True)
-    recovered = 0
-    for c in archived:
-        label_names = [id_to_name.get(lid, "").lower() for lid in c.get("idLabels", [])]
-        if timer_label_name in label_names:
-            set_card_closed(c["id"], False)     # unarchive
-            move_card_to_list(c["id"], list_id) # ensure it’s in Daily Log
-            recovered += 1
-    if recovered:
-        print(f"Recovered {recovered} archived timer card(s) to Daily Log")
-
-    # --- 2) load current Daily Log cards (open only)
-    cards = list_cards(list_id, include_closed=False)
-    active_names = {c["name"] for c in cards if not c.get("closed")}
-
-    # cadences from config
+    # cadences from config: {label: {"days": int, "category": str}}
     cadences_cfg = CFG.get("cadences", {})
-    cadences = {k.lower(): {"days": int(v["days"]), "category": v.get("category","uncategorized")}
-                for k,v in cadences_cfg.items()}
-
-    suffix = CFG.get("defaults",{}).get("daily_spawn_suffix"," – 1h")
+    cadences = {k.lower(): int(v["days"]) for k,v in cadences_cfg.items()}
     timer_hour = CFG.get("defaults",{}).get("timer_hour","03:00")
 
-    metrics_cfg = CFG.get("metrics", {"enable": True, "csv_path": "metrics/blocks.csv"})
-    metrics_on = metrics_cfg.get("enable", True)
-    metrics_path = metrics_cfg.get("csv_path", "metrics/blocks.csv")
-    if metrics_on:
-        ensure_metrics_csv(metrics_path)
-
-    created = 0
+    archived = board_cards(board_id, filter_mode="closed")
+    recovered = 0
     bumped = 0
 
-    for c in cards:
-        label_names = [id_to_name.get(lid, "") for lid in c.get("idLabels", [])]
-        lname_set = {n.lower() for n in label_names}
-        if timer_label_name not in lname_set:
+    for c in archived:
+        # must be a timer + have a cadence label
+        label_names = [id_to_name.get(lid,"").lower() for lid in c.get("idLabels",[])]
+        if timer_label_name not in label_names:
             continue
 
-        cadence_label = None
         cadence_days = None
-        category = "uncategorized"
-        for lname in lname_set:
+        for lname in label_names:
             if lname in cadences:
-                cadence_label = lname
-                cadence_days = cadences[lname]["days"]
-                category = cadences[lname]["category"]
+                cadence_days = cadences[lname]
                 break
         if not cadence_days:
             continue
@@ -175,21 +117,22 @@ def main():
         due_utc = parse_due_utc(c.get("due"))
         now_utc = datetime.now(ZoneInfo("UTC"))
         if not due_utc or now_utc < due_utc:
-            continue  # not due yet
+            log(f"skip archived '{c['name']}' (not due yet)")
+            continue
 
-        work_name = f"{c['name']}{suffix}"
-        if work_name not in active_names:
-            spawned = create_card(list_id, work_name)
-            active_names.add(work_name)
-            created += 1
-            if metrics_on:
-                append_metric(metrics_path, work_name, cadence_label, category, list_id, spawned["id"])
+        # due → bring it back for today
+        log(f"UNARCHIVE → '{c['name']}' (due reached)")
+        set_card_closed(c["id"], False)
+        move_card_to_list(c["id"], list_id)
+        recovered += 1
 
+        # bump its due to next cycle right away
         new_due = next_due_utc(cadence_days, timer_hour)
         update_card_due(c["id"], new_due)
         bumped += 1
+        log(f"bumped '{c['name']}' → next due {new_due}")
 
-    print(f"Timers processed OK — recovered: {recovered}, spawned: {created}, bumped: {bumped}")
+    print(f"Timers processed OK — recovered: {recovered}, bumped: {bumped}")
 
 if __name__ == "__main__":
     main()
