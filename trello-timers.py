@@ -117,6 +117,9 @@ def main():
 
         due_utc = parse_due_utc(c.get("due"))
         
+        # Debug: show the actual dates being compared
+        log(f"DEBUG → '{c['name']}' due_utc: {due_utc}, now_utc: {now_utc}")
+        
         # Only recover if the card is actually overdue
         if not is_card_overdue(due_utc, now_utc):
             log(f"SKIP (not due yet) → '{c['name']}' due: {due_utc}")
