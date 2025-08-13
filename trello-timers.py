@@ -106,6 +106,11 @@ def main():
     now_utc = datetime.now(ZoneInfo("UTC"))
 
     # 1) recover only overdue archived timer cards
+    print(f"DEBUG: Current time (UTC): {now_utc}")
+    print(f"DEBUG: Looking for timer label: '{timer_label}'")
+    print(f"DEBUG: Available cadences: {cadences}")
+    
+    archived_timer_cards = []
     for c in board_cards(board_id, filter_mode="closed"):
         labels = [id_to_name.get(lid,"").lower() for lid in c.get("idLabels",[])]
         if timer_label not in labels:
@@ -113,20 +118,41 @@ def main():
         
         cadence_days = next((cadences[l] for l in labels if l in cadences), None)
         if not cadence_days:
+            print(f"DEBUG: No cadence found for '{c['name']}' with labels: {labels}")
             continue
 
         due_utc = parse_due_utc(c.get("due"))
+        print(f"DEBUG: Card '{c['name']}' - Raw due: {c.get('due')} - Parsed due_utc: {due_utc}")
         
-        # Debug: show the actual dates being compared
-        log(f"DEBUG → '{c['name']}' due_utc: {due_utc}, now_utc: {now_utc}")
+        if due_utc is None:
+            print(f"DEBUG: Skipping '{c['name']}' - No due date")
+            continue
+            
+        is_overdue = is_card_overdue(due_utc, now_utc)
+        print(f"DEBUG: Card '{c['name']}' - is_overdue: {is_overdue} (due: {due_utc} vs now: {now_utc})")
         
-        # Only recover if the card is actually overdue
-        if not is_card_overdue(due_utc, now_utc):
-            log(f"SKIP (not due yet) → '{c['name']}' due: {due_utc}")
+        archived_timer_cards.append({
+            'card': c,
+            'due_utc': due_utc,
+            'is_overdue': is_overdue,
+            'cadence_days': cadence_days
+        })
+
+    print(f"DEBUG: Found {len(archived_timer_cards)} archived timer cards")
+    
+    # Now process only the overdue ones
+    for item in archived_timer_cards:
+        c = item['card']
+        due_utc = item['due_utc']
+        is_overdue = item['is_overdue']
+        cadence_days = item['cadence_days']
+        
+        if not is_overdue:
+            print(f"SKIP (not due yet) → '{c['name']}' due: {due_utc}")
             skipped += 1
             continue
 
-        log(f"UNARCHIVE (overdue) → '{c['name']}' was due: {due_utc}")
+        print(f"UNARCHIVE (overdue) → '{c['name']}' was due: {due_utc}")
         set_card_closed(c["id"], False)
         move_card_to_list(c["id"], list_id)
         recovered += 1
@@ -136,7 +162,7 @@ def main():
         set_due_and_uncomplete(c["id"], new_due)
         bumped += 1
         reset_due += 1
-        log(f"bumped + dueComplete=false → '{c['name']}' → {new_due}")
+        print(f"bumped + dueComplete=false → '{c['name']}' → {new_due}")
 
     # 2) safety: archive legacy clones like "… – 1h" / "... - 1h" that are not timer cards
     suffixes = ("– 1h", "- 1h")
