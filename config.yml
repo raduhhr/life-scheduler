@@ -19,6 +19,9 @@ cadences:
   every-6-days:
     days: 6
     category: "learning"     # Example: Homelab
+  weekly:
+    days: 7
+    category: "learning"
   bi-monthly:
     days: 15
     category: "learning"
