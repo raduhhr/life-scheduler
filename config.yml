@@ -13,7 +13,18 @@ cadences:
   every-4-days:
     days: 4
     category: "learning"   # Example: Algorithms
-
+  every-5-days:
+    days: 5
+    category: "learning"         # Example: AI work
+  every-6-days:
+    days: 6
+    category: "learning"     # Example: Homelab
+  bi-monthly:
+    days: 15
+    category: "learning"
+  monthly:
+    days: 15
+    category: "learning"
 defaults:
   timer_hour: "03:00"          # Time the next due is set to
   daily_spawn_suffix: " – 1h"  # Added to generated task names
