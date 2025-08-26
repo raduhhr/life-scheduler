@@ -26,7 +26,7 @@ cadences:
     days: 15
     category: "learning"
   monthly:
-    days: 15
+    days: 30
     category: "learning"
 defaults:
   timer_hour: "03:00"          # Time the next due is set to
