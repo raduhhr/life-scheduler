@@ -1,275 +1,210 @@
+```markdown
 # Life-Scheduler
 
-A Trello-based personal productivity system that automatically manages recurring tasks and daily routines using timer cards and Butler automation.
+Life-Scheduler is a Trello-based automation system that combines **Butler rules** and a **Python script (run via GitHub Actions)** to keep your daily routine and recurring tasks self-managing.
+
+---
 
 ## Overview
 
-Life-Scheduler is a Python-based automation tool that integrates with Trello to create a sophisticated personal task management system. It combines recurring "timer" tasks with daily routine automation to help you maintain consistent habits and workflows.
+- **Ritual cards (Butler)**  
+  Every night, Butler archives yesterday’s tasks and clones two ritual templates into your **Daily Log**:  
+  - 🌅 **Morning Ritual** – start-of-day checklist (e.g., breakfast, planning, quick cleaning)  
+  - 🌙 **Evening Ritual** – end-of-day checklist (e.g., dinner, shower, review day, plan tomorrow)  
 
-### Key Features
+- **Recurring blocks (Life-Scheduler script)**  
+  The Python script checks your Trello board for archived cards labeled with `timer` and a cadence label (e.g., `Daily`, `every-3-days`, `weekly`).  
+  - If a card’s due date has passed, it is **unarchived**, moved to **Daily Log**, and assigned a new due date.  
+  - If it’s not due yet, it stays archived.  
+  - Optional metrics are logged to CSV for tracking.
 
-- **Automated Timer Recovery**: Recovers archived timer cards only when they're actually due
-- **Smart Scheduling**: Automatically reschedules recurring tasks based on configurable cadences
-- **Daily Routine Automation**: Creates daily habit cards automatically via Trello Butler
-- **Timezone Support**: Handles timezone conversions properly for global usage
-- **Duplicate Prevention**: Cleans up legacy task duplicates automatically
+**Result:** Each day your **Daily Log** contains:
+- A **Morning Ritual** card to start the day,  
+- The **recurring blocks** that are actually due,  
+- An **Evening Ritual** card to close the day.  
+
+---
 
 ## How It Works
 
-### Timer System
-The core concept revolves around "timer" cards that represent recurring tasks:
+```
 
-1. **Timer Cards**: Tasks labeled with `timer` and a cadence label (e.g., `every-2-days`)
-2. **Due Date Management**: Cards are automatically archived when completed and recovered when due
-3. **Smart Recovery**: Only overdue cards are brought back from archive
-4. **Automatic Rescheduling**: When recovered, cards get new due dates based on their cadence
+00:00–02:00   Butler night routine
+├─ Archives yesterday’s lists
+└─ Copies ritual templates:
+• Morning Ritual
+• Evening Ritual
 
-### Daily Routine Automation
-Using Trello Butler, the system automatically creates daily habit cards like:
-- Breakfast
-- Wash Teeth (Morning/Night)
-- Lunch
-- Work blocks
-- Exercise
-- Shower
+On schedule   GitHub Actions → trello-timers.py
+├─ Scans archived cards
+├─ Finds cards labeled:  timer  +  <cadence>
+├─ If overdue → unarchive, move to Daily Log, reset due
+└─ Logs optional metrics
+
+````
+
+---
 
 ## Installation
 
 ### Prerequisites
-
 - Python 3.9+
 - A Trello account with API access
-- Trello Butler Power-Up enabled on your board
+- Trello Butler Power-Up enabled
 
-### Required Python Packages
-
+### Python packages
 ```bash
 pip install requests pyyaml
-```
+````
 
-### Environment Setup
+### Environment setup
 
-1. **Get Trello API Credentials**:
-   - Go to https://trello.com/app-key
-   - Copy your API Key
-   - Generate a token with read/write permissions
+1. **Get Trello API credentials**
 
-2. **Set Environment Variables**:
+   * Go to [https://trello.com/app-key](https://trello.com/app-key)
+   * Copy your API key and generate a token
+
+2. **Set environment variables**
+
    ```bash
    export TRELLO_API_KEY="your_api_key_here"
    export TRELLO_API_TOKEN="your_token_here"
-   export TRELLO_BOARD_ID="your_board_id"  # Optional if using LIST_ID
-   export TRELLO_LIST_ID="your_list_id"    # Optional if using BOARD_ID
+   export TRELLO_BOARD_ID="your_board_id"  # or TRELLO_LIST_ID
    ```
 
-3. **Create Configuration File** (`config.yml`):
+3. **Create config.yml**
+
    ```yaml
    timezone: "Europe/Bucharest"
    list_name: "Daily Log"
-   
    labels:
      timer: "timer"
-   
+
    cadences:
-     every-2-days:
-       days: 2
-     every-3-days:
-       days: 3
-     every-4-days:
-       days: 4
-   
+     Daily:        { days: 1 }
+     every-3-days: { days: 3 }
+     weekly:       { days: 7 }
+
    defaults:
      timer_hour: "03:00"
+
+   metrics:
+     enable: true
+     csv_path: "metrics/blocks.csv"
    ```
+
+---
 
 ## Configuration
 
-### config.yml Structure
+| Setting               | Description                           | Default              |
+| --------------------- | ------------------------------------- | -------------------- |
+| `timezone`            | Your local timezone                   | `"Europe/Bucharest"` |
+| `list_name`           | Trello list where due cards are moved | `"Daily Log"`        |
+| `labels.timer`        | Label name for timer cards            | `"timer"`            |
+| `cadences`            | Recurrence intervals (days)           | Custom               |
+| `defaults.timer_hour` | Time new due dates are set            | `"03:00"`            |
+| `metrics`             | Enable CSV logging                    | `false`              |
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `timezone` | Your local timezone | `"Europe/Bucharest"` |
-| `list_name` | Name of your main task list | `"Daily Log"` |
-| `labels.timer` | Label name for timer cards | `"timer"` |
-| `cadences` | Recurring intervals for tasks | See example |
-| `defaults.timer_hour` | Time when timer cards become due | `"03:00"` |
-
-### Cadence Configuration
-
-Define how often different types of tasks repeat:
+Cadence example:
 
 ```yaml
 cadences:
-  every-2-days:
-    days: 2
-  every-3-days:
-    days: 3
-  every-4-days:
-    days: 4
-  weekly:
-    days: 7
-  bi-weekly:
-    days: 14
+  every-2-days: { days: 2 }
+  every-3-days: { days: 3 }
+  weekly:       { days: 7 }
+  monthly:      { days: 30 }
 ```
+
+---
 
 ## Usage
 
-### Running the Timer Script
+Run manually:
 
 ```bash
 python trello-timers.py
 ```
 
-### Verbose Mode (for debugging)
+Debug mode:
 
 ```bash
 VERBOSE=1 python trello-timers.py
 ```
 
-### Setting Up Butler Automation
+---
 
-In Trello Butler, create this daily automation rule:
+## GitHub Actions setup
 
-```
-every day at 2:00 am, 
-archive all the cards in list "Daily Log", 
-archive all the cards in list "DONE", 
-create a new card with title "Breakfast" in list "Daily Log" and add the dark purple "daily" label, 
-create a new card with title "Wash Teeth Morning" in list "Daily Log" and add the dark purple "daily" label, 
-create a new card with title "lunch" in list "Daily Log" and add the dark purple "daily" label, 
-create a new card with title "C&Algos - 1hr" in list "Daily Log" and add the dark purple "daily" label, 
-create a new card with title "Shower" in list "Daily Log" and add the dark purple "daily" label, 
-and create a new card with title "Wash Teeth Night" in list "Daily Log" and add the dark purple "daily" label
-```
-
-### Creating Timer Cards
-
-1. Create a card with your task name
-2. Add the `timer` label
-3. Add a cadence label (e.g., `every-2-days`)
-4. Set an initial due date
-5. When you complete the task, archive the card
-
-The system will automatically bring it back when it's due again.
-
-## Trello Board Setup
-
-### Required Lists
-- **Daily Log**: Main working list for current tasks
-- **DONE**: Completed tasks (optional, for Butler cleanup)
-
-### Required Labels
-- **timer**: Purple label for recurring timer tasks
-- **daily**: Dark purple label for daily habit cards
-- **every-2-days**: Cadence label for 2-day intervals
-- **every-3-days**: Cadence label for 3-day intervals
-- **every-4-days**: Cadence label for 4-day intervals
-
-### Recommended Workflow
-
-1. **Morning**: Check Daily Log for today's tasks
-2. **Throughout Day**: Complete tasks and archive when done
-3. **Evening**: Timer cards stay archived until due
-4. **Automatic**: Butler creates fresh daily cards at 2 AM
-5. **Automatic**: Timer script recovers overdue recurring tasks
-
-## Advanced Features
-
-### Custom Timer Hours
-Set when timer cards become "due" by adjusting `timer_hour` in config:
+`.github/workflows/trello-timers.yml`:
 
 ```yaml
-defaults:
-  timer_hour: "06:00"  # Cards become due at 6 AM
+name: life-scheduler
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python trello-timers.py
+        env:
+          TRELLO_API_KEY:   ${{ secrets.TRELLO_API_KEY }}
+          TRELLO_API_TOKEN: ${{ secrets.TRELLO_API_TOKEN }}
+          TRELLO_BOARD_ID:  ${{ secrets.TRELLO_BOARD_ID }}
+          CONFIG_PATH:      config.yml
+          VERBOSE:          "0"
 ```
 
-### Timezone Handling
-The system properly handles timezone conversions. Set your local timezone:
+---
 
-```yaml
-timezone: "America/New_York"  # or any valid timezone
-```
+## Trello Setup
 
-### Duplicate Cleanup
-The script automatically removes duplicate cards ending with "– 1h" or "- 1h" that aren't proper timer cards.
+### Lists
 
-## Scheduling
+* **Daily Log** – where active tasks appear
+* **DONE** – optional cleanup list
 
-### Cron Setup
-Run the timer script automatically with cron:
+### Labels
 
-```bash
-# Add to your crontab (crontab -e)
-*/15 * * * * cd /path/to/life-scheduler && python trello-timers.py >/dev/null 2>&1
-```
+* `timer` – all recurring cards
+* Cadence labels – must match `cadences` in config (`Daily`, `every-3-days`, …)
 
-This runs every 15 minutes to check for overdue timer cards.
+### Ritual cards
+
+Butler clones two templates daily:
+
+* **Morning Ritual** (checklist)
+* **Evening Ritual** (checklist)
+
+### Timer cards
+
+1. Create card (e.g., `Job Hunting`).
+2. Add labels: `timer` + `every-3-days`.
+3. Set initial due date.
+4. Archive when completed — script revives when due.
+
+---
 
 ## Troubleshooting
 
-### Common Issues
+* **Missing creds** → Check API key/token are set in secrets.
+* **List not found** → Ensure `list_name` matches exactly.
+* **Cards not reviving** → Must have `timer` + cadence label + past due date.
+* **Timezone issues** → Trello stores UTC, script converts with your config.
 
-1. **"Missing Trello creds" Error**
-   - Ensure `TRELLO_API_KEY` and `TRELLO_API_TOKEN` are set
-   - Check that your token has read/write permissions
-
-2. **"List not found" Error**
-   - Verify `TRELLO_BOARD_ID` points to correct board
-   - Ensure the list name in config matches your Trello list exactly
-
-3. **Timer Cards Not Recovering**
-   - Run with `VERBOSE=1` to see debug output
-   - Check that cards have both `timer` and cadence labels
-   - Verify due dates are actually in the past
-
-4. **Timezone Issues**
-   - Ensure your timezone string is valid (use `pytz.all_timezones` to check)
-   - Remember that due dates are stored in UTC in Trello
-
-### Debug Mode
-
-Run with verbose logging to see exactly what's happening:
+Debug logs with:
 
 ```bash
 VERBOSE=1 python trello-timers.py
 ```
 
-This shows:
-- Current time and timezone
-- Cards being processed
-- Due date comparisons
-- Why cards are skipped or recovered
+---
 
-## Output
-
-The script provides clear status output:
-
-```
-Timers OK — recovered:2, dueReset:2, bumped:2, skipped:1, cleanedClones:0
-```
-
-- **recovered**: Timer cards brought back from archive
-- **dueReset**: Cards that got new due dates
-- **bumped**: Cards moved to active list
-- **skipped**: Cards not yet due
-- **cleanedClones**: Duplicate cards removed
-
-## Integration Tips
-
-### With Other Tools
-- **Calendar Sync**: Use Trello's calendar Power-Up to see due dates
-- **Mobile Access**: Use Trello mobile app for on-the-go task completion
-- **Notifications**: Enable Trello notifications for due date reminders
-
-### Workflow Optimization
-- **Time Blocking**: Create timer cards for focused work sessions
-- **Habit Tracking**: Use daily cards for habit formation
-- **Project Management**: Combine with regular Trello cards for larger projects
-
-## License
-
-This project is open source and available under the MIT License.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
