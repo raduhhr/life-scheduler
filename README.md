@@ -1,6 +1,6 @@
 # Life-Scheduler
 
-Life-Scheduler is a Trello-based automation that combines **Butler rules** and a **Python script (run via GitHub Actions)** to keep daily rituals and recurring “block” tasks self-managing.
+Life-Scheduler is a Trello-based automation that combines **Butler rules** and a **Python script (ran via GitHub Actions)** to keep daily rituals and recurring “block” tasks self-managing.
 
 ---
 
